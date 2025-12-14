@@ -1,0 +1,9 @@
+# node / next
+node_modules/
+.next/
+dist/
+.env.local
+.env.*
+.DS_Store
+npm-debug.log*
+pnpm-lock.yaml
