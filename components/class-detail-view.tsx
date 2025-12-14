@@ -10,6 +10,7 @@ import { StudentManagement } from "@/components/student-management"
 import { GradeTypeManagement } from "@/components/grade-type-management"
 import { GradeInput } from "@/components/grade-input"
 import { ExportPdfDialog } from "@/components/export-pdf-dialog"
+import { RaportView } from "@/components/raport-view"
 
 interface ClassDetailViewProps {
   classData: Class
@@ -43,10 +44,11 @@ export function ClassDetailView({ classData, students, gradeTypes, grades, teach
       </div>
 
       <Tabs defaultValue="grades" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-3 lg:w-auto lg:inline-grid">
+        <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:inline-grid">
           <TabsTrigger value="grades">Nilai</TabsTrigger>
           <TabsTrigger value="students">Murid</TabsTrigger>
           <TabsTrigger value="types">Jenis Nilai</TabsTrigger>
+          <TabsTrigger value="raport">Raport</TabsTrigger>
         </TabsList>
 
         <TabsContent value="grades">
@@ -59,6 +61,16 @@ export function ClassDetailView({ classData, students, gradeTypes, grades, teach
 
         <TabsContent value="types">
           <GradeTypeManagement classId={classData.id} gradeTypes={gradeTypes} />
+        </TabsContent>
+
+        <TabsContent value="raport">
+          <RaportView
+            classData={classData}
+            students={students}
+            gradeTypes={gradeTypes}
+            grades={grades}
+            teacherName={teacherName}
+          />
         </TabsContent>
       </Tabs>
 
