@@ -24,29 +24,85 @@ export function RaportView({ classData, students, gradeTypes, grades, teacherNam
     scoresMap[g.student_id][g.grade_type_id] = Number(g.score)
   })
 
-  function studentAverage(studentId: number) {
-    const records = scoresMap[studentId] || {}
-    const values = Object.values(records).filter((v) => typeof v === "number")
-    if (values.length === 0) return 0
-    return values.reduce((s, v) => s + v, 0) / values.length
+  // Infer subjects from grade type names by removing common assessment tokens
+  const assessmentTokens = new Set([
+    "uts",
+    "uas",
+    "ulangan",
+    "tugas",
+    "pts",
+    "pas",
+    "sts",
+    "sas",
+    "kuis",
+    "praktikum",
+    "project",
+    "penugasan",
+    "tugas_praktik",
+  ])
+
+  function inferSubject(name: string) {
+    if (!name) return name
+    const normalized = name.replace(/[-_]/g, " ").trim()
+    // If format "Subject - Type", take left side
+    if (normalized.includes(" - ")) return normalized.split(" - ")[0].trim()
+    // otherwise remove assessment tokens
+    const parts = normalized.split(/\s+/).filter(Boolean)
+    const filtered = parts.filter((p) => !assessmentTokens.has(p.toLowerCase()))
+    if (filtered.length === 0) return normalized
+    return filtered.join(" ")
+  }
+
+  // Map subjects to gradeType ids (preserve order of first appearance)
+  const subjectsOrder: string[] = []
+  const subjectsMap: Record<string, number[]> = {}
+  gradeTypes.forEach((gt: any) => {
+    const subj = inferSubject(gt.name)
+    if (!subjectsMap[subj]) {
+      subjectsMap[subj] = []
+      subjectsOrder.push(subj)
+    }
+    subjectsMap[subj].push(gt.id)
+  })
+
+  function studentSubjectAverage(studentId: number, subj: string) {
+    const typeIds = subjectsMap[subj] || []
+    const vals: number[] = []
+    for (const tid of typeIds) {
+      const v = scoresMap[studentId] && scoresMap[studentId][tid]
+      if (typeof v === "number") vals.push(v)
+    }
+    if (vals.length === 0) return null
+    return vals.reduce((s, v) => s + v, 0) / vals.length
+  }
+
+  function studentOverallAverage(studentId: number) {
+    const avgs: number[] = []
+    for (const subj of subjectsOrder) {
+      const a = studentSubjectAverage(studentId, subj)
+      if (a !== null) avgs.push(a)
+    }
+    if (avgs.length === 0) return 0
+    return avgs.reduce((s, v) => s + v, 0) / avgs.length
   }
 
   async function exportExcel() {
     setLoading(true)
     const XLSX = await import("xlsx")
 
-    const header = ["No", "NIS/NISN", "Nama", "Kelas", ...gradeTypes.map((g) => g.name), "NA"]
+    // CSV header should have subjects (one column per subject) and NA as average per student
+    const header = ["No", "NIS/NISN", "Nama", "Kelas", ...subjectsOrder, "NA"]
     const data = students.map((s, idx) => {
       const row: any[] = []
       row.push(idx + 1)
       row.push(s.nis || "")
       row.push(s.name)
-      row.push(classData.name)
-      gradeTypes.forEach((gt) => {
-        const val = scoresMap[s.id] && scoresMap[s.id][gt.id]
-        row.push(typeof val === "number" ? Number(val.toFixed(1)) : "")
+      row.push(`KELAS ${classData.name}`)
+      subjectsOrder.forEach((subj) => {
+        const val = studentSubjectAverage(s.id, subj)
+        row.push(val === null ? "" : Number(val.toFixed(1)))
       })
-      row.push(Number(studentAverage(s.id).toFixed(1)))
+      row.push(Number(studentOverallAverage(s.id).toFixed(1)))
       return row
     })
 
@@ -136,6 +192,50 @@ export function RaportView({ classData, students, gradeTypes, grades, teacherNam
     setLoading(false)
   }
 
+  // New: Export CSV matching template
+  function exportCsv() {
+    const header = ["No","NIS/NISN","Nama","Kelas", ...subjectsOrder, "NA"]
+    const rows = [header]
+    students.forEach((s, idx) => {
+      const row: any[] = []
+      row.push(idx + 1)
+      row.push(s.nis || "")
+      row.push(s.name)
+      row.push(`KELAS ${classData.name}`)
+      subjectsOrder.forEach((subj) => {
+        const val = studentSubjectAverage(s.id, subj)
+        row.push(val === null ? "" : Number(val.toFixed(1)))
+      })
+      row.push(Number(studentOverallAverage(s.id).toFixed(1)))
+      rows.push(row)
+    })
+
+    // Build CSV string
+    const csv = rows
+      .map((r) =>
+        r
+          .map((cell) => {
+            if (cell === null || cell === undefined) return ""
+            const s = String(cell)
+            // escape quotes
+            if (s.includes(",") || s.includes("\n") || s.includes('"')) return `"${s.replace(/"/g, '""')}"`
+            return s
+          })
+          .join(","),
+      )
+      .join("\n")
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `Raport_${classData.name.replace(/\s+/g, "_")}.csv`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -146,6 +246,9 @@ export function RaportView({ classData, students, gradeTypes, grades, teacherNam
         <div className="flex gap-2">
           <Button variant="outline" onClick={exportExcel} disabled={loading}>
             <FileDown className="h-4 w-4 mr-2" /> Export Excel
+          </Button>
+          <Button variant="outline" onClick={exportCsv} disabled={loading}>
+            <FileDown className="h-4 w-4 mr-2" /> Export CSV
           </Button>
         </div>
       </div>
@@ -158,8 +261,8 @@ export function RaportView({ classData, students, gradeTypes, grades, teacherNam
               <TableHead>NIS/NISN</TableHead>
               <TableHead>Nama</TableHead>
               <TableHead>Kelas</TableHead>
-              {gradeTypes.map((gt) => (
-                <TableHead key={gt.id}>{gt.name}</TableHead>
+              {subjectsOrder.map((subj) => (
+                <TableHead key={subj}>{subj}</TableHead>
               ))}
               <TableHead>NA</TableHead>
               <TableHead>Aksi</TableHead>
@@ -171,11 +274,16 @@ export function RaportView({ classData, students, gradeTypes, grades, teacherNam
                 <TableCell>{idx + 1}</TableCell>
                 <TableCell>{s.nis || ""}</TableCell>
                 <TableCell>{s.name}</TableCell>
-                <TableCell>{classData.name}</TableCell>
-                {gradeTypes.map((gt) => (
-                  <TableCell key={gt.id}>{(scoresMap[s.id] && scoresMap[s.id][gt.id]) ?? "-"}</TableCell>
+                <TableCell>{`KELAS ${classData.name}`}</TableCell>
+                {subjectsOrder.map((subj) => (
+                  <TableCell key={subj}>
+                    {(() => {
+                      const v = studentSubjectAverage(s.id, subj)
+                      return v === null ? "-" : Number(v.toFixed(1))
+                    })()}
+                  </TableCell>
                 ))}
-                <TableCell>{Number(studentAverage(s.id).toFixed(1))}</TableCell>
+                <TableCell>{Number(studentOverallAverage(s.id).toFixed(1))}</TableCell>
                 <TableCell>
                   <Button size="sm" variant="outline" onClick={() => exportStudentPdf(s)} disabled={loading}>
                     <FileText className="h-4 w-4 mr-2" /> PDF
